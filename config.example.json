@@ -1,0 +1,8 @@
+{
+  "pco_app_id": "<your-pco-app-id>",
+  "pco_secret": "<your-pco-personal-access-token>",
+  "pco_service_type_id": "<numeric-id-from-pco>",
+  "pco_service_type_name": "Praise Team",
+  "spotify_playlist_id": "<spotify-playlist-id>",
+  "artist_preferences": {}
+}
