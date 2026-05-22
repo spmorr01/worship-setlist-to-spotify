@@ -24,7 +24,7 @@ Built for worship team members who get the week's plan via PCO and want to pract
 ## Installation
 
 ```bash
-git clone https://github.com/<you>/worship-setlist-to-spotify ~/Projects/worship-setlist-to-spotify
+git clone https://github.com/spmorr01/worship-setlist-to-spotify ~/Projects/worship-setlist-to-spotify
 cd ~/Projects/worship-setlist-to-spotify
 ./scripts/setup.sh
 ```
