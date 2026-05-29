@@ -115,7 +115,7 @@ For each song, pick the artist filter in this priority order:
 2. Else the PCO `Arrangement.name` from the plan item, when it names a real artist/version (e.g. "The Worship Initiative", "New Life Worship", "Bethel"). **This is the recording your church actually plays — trust it as the artist filter.** It appears in PCO as the arrangement/version dropdown on a plan's Song tab, alongside the key. **Ignore placeholder names** like "Default Arrangement" (and blank/null) — those carry no artist signal.
 3. Else fall back to title alone.
 
-Then call `searchSpotify` with `q=track:"<title>" artist:"<artist hint>"` (drop the `artist:` clause when there's no hint). **Default to the top result Spotify returns** — it is ordered by popularity/relevance and is almost always the canonical recording. Only override the top result to skip an obviously-wrong match (karaoke/tribute/instrumental, or a live cut when a studio version of the same recording sits just below). Don't hold alternates or pause to ask mid-resolution — the single batch approval below is the confirmation gate.
+Then call `searchSpotify` with `q=track:"<title>" artist:"<artist hint>"` (drop the `artist:` clause when there's no hint). **Take the top result Spotify returns** — it is ordered by popularity/relevance, so the #1 hit is the pick, live or studio alike. The `artist:` filter already keeps tribute/karaoke acts out of the running. Don't hold alternates or pause to ask mid-resolution — the single batch approval below is the confirmation gate.
 
 Never use PCO `Song.author` as the Spotify artist filter — that field is the songwriter, not the recording artist your church covers.
 
@@ -127,17 +127,22 @@ Present the full candidate table — Title / Artist / Spotify URL — for ONE ba
 
 ### 3. Replace playlist contents (add-then-prune)
 
-Order matters. Add new tracks first, then remove old. The playlist transiently holds both but is never empty — reverse order can wipe the playlist if the add call fails mid-flow.
+Order matters. Add first, then remove. The playlist transiently holds both old and new but is never empty — reverse order can wipe the playlist if the add call fails mid-flow.
+
+**Diff the sets — don't blind-replace.** Spotify's `removeTracksFromPlaylist` removes *every* occurrence of a given track ID. So a song present in BOTH the current playlist and the approved set would be added (now duplicated) and then fully removed — deleting a song you meant to keep. Churches repeat songs week-to-week, so overlap is the norm, not the exception. Only add and remove the differences.
 
 1. Fetch current track URIs from `spotify_playlist_id` via `getPlaylistTracks` (paginate fully).
-2. `addTracksToPlaylist` with approved URIs. **Chunk ≤100 URIs per call.**
-3. Verify add: re-fetch via `getPlaylistTracks` and confirm new URIs are present.
-4. `removeTracksFromPlaylist` for the old URIs. **Chunk ≤100 per call.**
-5. Verify final state: re-fetch via `getPlaylistTracks` and confirm the live track list matches the approved set. Report diff (added / removed).
+2. Compute `to_add = approved − current` and `to_remove = current − approved` (set difference by track ID). Tracks in both sets are left untouched.
+3. `addTracksToPlaylist` with `to_add`. **Chunk ≤100 URIs per call.** Skip if empty.
+4. Verify add: re-fetch via `getPlaylistTracks` and confirm every `to_add` URI is present.
+5. `removeTracksFromPlaylist` with `to_remove`. **Chunk ≤100 per call.** Skip if empty.
+6. Verify final state: re-fetch via `getPlaylistTracks` and confirm the live track list equals the approved set. Report diff (added / removed / unchanged).
 
-**Never trust the track *count* from `getPlaylist` or `getMyPlaylists` — it is frequently stale** (it has reported "0 tracks" for a playlist that actually held 5). Always derive the real contents from `getPlaylistTracks`, both to compute the prune set in step 1 and to verify in steps 3 and 5. A stale count read as truth means pruning the wrong URIs — or skipping the prune entirely and leaving last week's songs behind.
+If `to_add` and `to_remove` are both empty, the playlist already matches the setlist — report "already in sync" and make no calls.
 
-If step 4 fails partway: stop, report exactly which old URIs still need removal. Duplicates are recoverable; an empty playlist 20 minutes before practice is not.
+**Never trust the track *count* from `getPlaylist` or `getMyPlaylists` — it is frequently stale** (it has reported "0 tracks" for a playlist that actually held 5). Always derive the real contents from `getPlaylistTracks`, both to compute the diff in steps 1–2 and to verify in steps 4 and 6. A stale count read as truth means diffing against the wrong baseline.
+
+If step 5 fails partway: stop, report exactly which `to_remove` URIs still need removal. Duplicates are recoverable; an empty playlist 20 minutes before practice is not.
 
 ## Anti-Patterns
 
@@ -150,10 +155,11 @@ If step 4 fails partway: stop, report exactly which old URIs still need removal.
 | Treat every PCO plan item as a song | Welcome/Communion/Announcement are plan items too |
 | Use the PCO Song `author` field as the Spotify artist | `author` is the songwriter, not the recording artist |
 | Remove old tracks before adding new ones | If add fails, the playlist is empty before practice |
+| Blind-replace (add all approved, remove all current) | `removeTracksFromPlaylist` deletes *every* occurrence of a track ID — a song in both sets gets added then wiped. Diff instead: add `approved − current`, remove `current − approved` |
 | Probe Spotify auth with a write call | A 401 on a destructive call leaves a half-modified playlist |
 | Grab "the next plan" globally | Always scope by cached `service_type_id`; confirm the name each run |
 | Skip pre-flight on "just refresh it" requests | Tokens expire; assumptions rot; pre-flight is cheap |
 
 ## The Bottom Line
 
-One rolling playlist. Version driven by the PCO arrangement name, resolved to Spotify's top result, confirmed in one batch and cached for next time. Add-then-prune (sequenced for safety, not atomic) — derive contents from `getPlaylistTracks`, never the cached count. Chunk to ≤100 URIs per call. Filter PCO items to songs only. Pre-flight every run; confirm service-type by name.
+One rolling playlist. Version driven by the PCO arrangement name, resolved to Spotify's top result, confirmed in one batch and cached for next time. Add-then-prune by **set difference** (sequenced for safety, not atomic) — derive contents from `getPlaylistTracks`, never the cached count; add `approved − current`, remove `current − approved`. Chunk to ≤100 URIs per call. Filter PCO items to songs only. Pre-flight every run; confirm service-type by name.
