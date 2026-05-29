@@ -8,7 +8,7 @@ Built for worship team members who get the week's plan via PCO and want to pract
 
 - Pulls the next service plan from your PCO "Praise Team" (or whichever) service type.
 - Filters PCO plan items to songs only — ignores Welcome, Communion, Sermon, etc.
-- Resolves each song to a specific Spotify track, preferring studio over live and asking you to confirm artist/version when ambiguous.
+- Resolves each song to a specific Spotify track — using the PCO arrangement name (the version your church plays) as the artist filter and defaulting to Spotify's top result — then asks you to confirm the full set in one batch.
 - Replaces the contents of one rolling Spotify playlist using an add-then-prune sequence (the playlist is never empty mid-sync).
 - Caches your artist choices so next week skips the "which version?" question for repeat songs.
 
@@ -52,7 +52,7 @@ After setup, any of these invocations work:
 The skill will:
 
 1. Fetch the next plan from your cached service type.
-2. Show you the song list + the Spotify track it picked for each (with 2 alternates inline when low-confidence).
+2. Show you the song list + the Spotify track it picked for each (using the PCO arrangement name as the version hint and Spotify's top result, flagging any song with no hint as low-confidence).
 3. Wait for your approval as a batch — not one song at a time.
 4. Add new tracks, verify, then remove the old ones.
 
@@ -75,7 +75,7 @@ If you switch churches or change service types, just edit the two `pco_service_t
 
 - **One rolling playlist, not a new one per week.** Keeps your library clean.
 - **Add-then-prune, never the reverse.** The playlist is transiently larger but never empty — if the add call fails for any reason, your old playlist is still intact.
-- **Artist picks require confirmation.** Wrong-version is the #1 failure mode for worship covers (Tomlin vs Hillsong "How Great Is Our God", etc.). One batch approval, then the choices are cached.
+- **Artist picks default to the PCO arrangement name + Spotify's top result, confirmed in one batch.** Wrong-version is the #1 failure mode for worship covers (Tomlin vs Hillsong "How Great Is Our God", etc.), so the arrangement name — the exact version your church plays — drives the pick. One batch approval, then the choices are cached.
 - **PCO `Song.author` is ignored as a Spotify artist filter.** That field is the songwriter, not the recording artist your church covers — using it surfaces obscure covers instead of the canonical version.
 
 See [SKILL.md](./SKILL.md) for the full agent-facing spec — anti-patterns, error-recovery rules, and pre-flight checklist.

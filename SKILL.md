@@ -110,11 +110,12 @@ GET /services/v2/service_types/{stid}/plans/{plan_id}/items?include=song,arrange
 
 Goal: ONE batch approval at the end, not N per-song asks.
 
-For each song:
-1. Check `config.json` → `artist_preferences[title]`. If cached, use as the artist filter.
-2. Else use the PCO `Arrangement.name` as a hint if present (often "Bethel - Goodness of God"-style free text — propose, don't blindly trust).
-3. Else fall back to title alone. Only ask the user inline if the title is famously ambiguous ("How Great Is Our God" — Tomlin vs Hillsong).
-4. Call `searchSpotify` with `q=track:"<title>" artist:"<artist hint>"`. Prefer studio over live. Hold top pick + 2 alternates.
+For each song, pick the artist filter in this priority order:
+1. `artist_preferences[title]` from `config.json`, if cached.
+2. Else the PCO `Arrangement.name` from the plan item, when it names a real artist/version (e.g. "The Worship Initiative", "New Life Worship", "Bethel"). **This is the recording your church actually plays — trust it as the artist filter.** It appears in PCO as the arrangement/version dropdown on a plan's Song tab, alongside the key. **Ignore placeholder names** like "Default Arrangement" (and blank/null) — those carry no artist signal.
+3. Else fall back to title alone.
+
+Then call `searchSpotify` with `q=track:"<title>" artist:"<artist hint>"` (drop the `artist:` clause when there's no hint). **Default to the top result Spotify returns** — it is ordered by popularity/relevance and is almost always the canonical recording. Only override the top result to skip an obviously-wrong match (karaoke/tribute/instrumental, or a live cut when a studio version of the same recording sits just below). Don't hold alternates or pause to ask mid-resolution — the single batch approval below is the confirmation gate.
 
 Never use PCO `Song.author` as the Spotify artist filter — that field is the songwriter, not the recording artist your church covers.
 
@@ -122,17 +123,19 @@ If `searchSpotify` returns **zero results** for a song: surface to user with opt
 
 On 429 (rate limit): honor `Retry-After`. If the wait exceeds 10s, surface to user.
 
-Present the full candidate table — Title / Artist / Spotify URL — with the 2 alternates inline for low-confidence picks. Require explicit approval before Step 3. On approval, persist any newly chosen artists to `artist_preferences`.
+Present the full candidate table — Title / Artist / Spotify URL — for ONE batch approval. Flag any pick made without an arrangement hint or cached preference as low-confidence, so the user knows which rows to scrutinize. Require explicit approval before Step 3. On approval, persist any newly chosen artists to `artist_preferences`.
 
 ### 3. Replace playlist contents (add-then-prune)
 
 Order matters. Add new tracks first, then remove old. The playlist transiently holds both but is never empty — reverse order can wipe the playlist if the add call fails mid-flow.
 
-1. Fetch current track URIs from `spotify_playlist_id`.
+1. Fetch current track URIs from `spotify_playlist_id` via `getPlaylistTracks` (paginate fully).
 2. `addTracksToPlaylist` with approved URIs. **Chunk ≤100 URIs per call.**
-3. Verify add: re-fetch and confirm new URIs are present.
+3. Verify add: re-fetch via `getPlaylistTracks` and confirm new URIs are present.
 4. `removeTracksFromPlaylist` for the old URIs. **Chunk ≤100 per call.**
-5. Verify final state: track count == approved list length. Report diff (added / removed).
+5. Verify final state: re-fetch via `getPlaylistTracks` and confirm the live track list matches the approved set. Report diff (added / removed).
+
+**Never trust the track *count* from `getPlaylist` or `getMyPlaylists` — it is frequently stale** (it has reported "0 tracks" for a playlist that actually held 5). Always derive the real contents from `getPlaylistTracks`, both to compute the prune set in step 1 and to verify in steps 3 and 5. A stale count read as truth means pruning the wrong URIs — or skipping the prune entirely and leaving last week's songs behind.
 
 If step 4 fails partway: stop, report exactly which old URIs still need removal. Duplicates are recoverable; an empty playlist 20 minutes before practice is not.
 
@@ -141,7 +144,9 @@ If step 4 fails partway: stop, report exactly which old URIs still need removal.
 | Don't | Why |
 |-------|-----|
 | Create a new dated playlist ("Worship 5/25") | One rolling playlist by design — duplicates clutter the library |
-| Add the first search result without confirming | Wrong artist/version is the #1 failure mode for worship covers |
+| Write picks to the playlist without the single batch approval | Wrong artist/version is the #1 failure mode for worship covers — the batch approval is the one gate (defaulting to Spotify's top result is fine; skipping the approval is not) |
+| Ignore the PCO arrangement name when it names an artist | It's the exact version your church plays — the strongest artist signal available, better than guessing from the title |
+| Trust the playlist's reported track *count* | `getPlaylist`/`getMyPlaylists` cache it and it's often wrong (reported 0 for 5). Read actual contents via `getPlaylistTracks` |
 | Treat every PCO plan item as a song | Welcome/Communion/Announcement are plan items too |
 | Use the PCO Song `author` field as the Spotify artist | `author` is the songwriter, not the recording artist |
 | Remove old tracks before adding new ones | If add fails, the playlist is empty before practice |
@@ -151,4 +156,4 @@ If step 4 fails partway: stop, report exactly which old URIs still need removal.
 
 ## The Bottom Line
 
-One rolling playlist. Artist/version chosen by the user, cached for next time. Add-then-prune (sequenced for safety, not atomic). Chunk to ≤100 URIs per call. Filter PCO items to songs only. Pre-flight every run; confirm service-type by name.
+One rolling playlist. Version driven by the PCO arrangement name, resolved to Spotify's top result, confirmed in one batch and cached for next time. Add-then-prune (sequenced for safety, not atomic) — derive contents from `getPlaylistTracks`, never the cached count. Chunk to ≤100 URIs per call. Filter PCO items to songs only. Pre-flight every run; confirm service-type by name.
